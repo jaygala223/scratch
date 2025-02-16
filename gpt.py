@@ -1,19 +1,19 @@
 import re
 import torch.nn as nn
 
-with open('panchatantra.txt', 'r', encoding='utf-8') as f:
-    text = f.read()
+# with open('panchatantra.txt', 'r', encoding='utf-8') as f:
+#     text = f.read()
 
-# result = re.findall(r'\w+|[^\w\s]', text)
-preprocessed_text = re.split(r'([,.:;?_!"()\']|--|\s)', text)
-preprocessed_text = [item.strip() for item in preprocessed_text]
+# # result = re.findall(r'\w+|[^\w\s]', text)
+# preprocessed_text = re.split(r'([,.:;?_!"()\']|--|\s)', text)
+# preprocessed_text = [item.strip() for item in preprocessed_text]
 
-all_words = sorted(list(set(preprocessed_text)))
-all_words.extend(["<|end_of_text|>", "<|unk|>"])
+# all_words = sorted(list(set(preprocessed_text)))
+# all_words.extend(["<|end_of_text|>", "<|unk|>"])
 
-vocab = {token: i for i, token in enumerate(all_words)}
+# vocab = {token: i for i, token in enumerate(all_words)}
 
-print(len(vocab))
+# print(len(vocab))
 
 # tokenizer
 class SimpleTokenizer:
@@ -271,4 +271,5 @@ def main():
     print("Output length:", len(out[0]))
     print("Output text:", decoded_text)
 
-main()
+if __name__ == "__main__":
+    main()
