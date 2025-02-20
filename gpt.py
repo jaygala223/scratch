@@ -21,16 +21,20 @@ class SimpleTokenizer:
         self.stoi = vocab # dict --> string: id
         self.itos = {i:s for s,i in vocab.items()}
     
-    def encode(self, text):
-        preprocessed = re.split(r'([,.:;?_!"()\']|--|\s)', text)
+    def encode(self, input: list):
+        # preprocessed = re.split(r'([,.:;?_!"()\']|--|\s)', text)
+        preprocessed = input
         preprocessed = [item.strip() for item in preprocessed]
+        for item in preprocessed:
+            if item in ['', ' ', '!', '"', '(', ')', ',', '.', '8', ':', ';', '?']:
+                preprocessed.remove(item)
         preprocessed = [item if item in self.stoi else "<|unk|>" for item in preprocessed]
         ids = [self.stoi[item] for item in preprocessed]
         return ids
     
     def decode(self, ids):
         text = ' '.join([self.itos[id] for id in ids])
-        text = re.sub(r'([,.:;?_!"()\']|--|\s)',r'\1',  text)
+        # text = re.sub(r'([,.:;?_!"()\']|--|\s)',r'\1',  text)
         return text
 
 # dataloader
@@ -38,12 +42,13 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 class PanchatantraDataset(Dataset):
-    def __init__(self, text, tokenizer, context_length, stride=1):
+    def __init__(self, input, tokenizer, context_length, stride=1):
         self.tokenizer = tokenizer
         self.input_ids = []
         self.target_ids = []
 
-        token_ids = tokenizer.encode(text)
+        token_ids = tokenizer.encode(input)
+        print(token_ids[:10])
 
         for i in range(0, len(token_ids) - context_length, stride):
             x = token_ids[i : i+context_length] # e.g [3, 41, 885, 696]
