@@ -6,6 +6,7 @@ import habana_frameworks.torch.core as htcore
 import habana_frameworks.torch.hpu.graphs as htgraphs
 import habana_frameworks.torch.hpu as hthpu
 import matplotlib.pyplot as plt
+import time
 
 if torch.hpu.is_available():
     device = "hpu"
@@ -22,8 +23,9 @@ preprocessed_text = [item.strip() for item in preprocessed_text]
 # print(preprocessed_text[:10])
 
 all_words = sorted(list(set(preprocessed_text)))
-punctuations = all_words[:11]
-all_words = all_words[11:] # remove punctuations from vocab
+print(all_words[:30])
+# punctuations = all_words[:19]
+all_words = all_words[19:] # remove punctuations from vocab
 all_words.extend(["<|end_of_text|>", "<|unk|>"])
 
 vocab = {token: i for i, token in enumerate(all_words)}
@@ -44,11 +46,11 @@ train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, drop_la
 test_dataloader = DataLoader(test_dataset, batch_size=8, shuffle=False, drop_last=False) #Added test dataloader
 
 model_config = {
-    "vocab_size": 1110,     # Vocabulary size
-    "context_length": 16,  # Context length
-    "emb_dim": 768,          # Embedding dimension
-    "n_heads": 16,           # Number of attention heads
-    "n_layers": 16,          # Number of layers
+    "vocab_size": len(vocab),     # Vocabulary size
+    "context_length": 128,  # Context length
+    "emb_dim": 1024,          # Embedding dimension
+    "n_heads": 32,           # Number of attention heads
+    "n_layers": 64,          # Number of layers
     "drop_rate": 0.1,        # Dropout rate
     "qkv_bias": False 
 }
@@ -64,6 +66,8 @@ loss_fn = torch.nn.CrossEntropyLoss()
 train_losses = []
 test_losses = []
 
+
+start = time.perf_counter()
 for epoch in range(num_epochs):
 
     print("Epoch:", epoch)
@@ -83,9 +87,6 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
         train_loss += loss.item()
-
-        if i%5 == 0:
-            print(f"Loss at {i}: {loss.item()}")
     
     #Testing Logic
     model.eval()
@@ -106,6 +107,8 @@ for epoch in range(num_epochs):
     print(f"Train Loss for epoch {epoch}: {avg_train_loss}")
     print(f"Test Loss for epoch {epoch}: {avg_test_loss}")
     model.train() #Switch back to training mode
+
+print(f"Total training duration: {time.perf_counter() - start}")
 
 #Plot the graph
 epochs = range(num_epochs)
@@ -135,7 +138,7 @@ print("encoded_tensor.shape:", encoded_tensor.shape)
 out = generate_text_simple(
     model=model,
     idx=encoded_tensor,
-    max_new_tokens=10,
+    max_new_tokens=64,
     context_size=model_config["context_length"]
 )
 decoded_text = tokenizer.decode(out.squeeze(0).tolist())
