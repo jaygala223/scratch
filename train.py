@@ -115,7 +115,7 @@ plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Train Loss vs Test Loss')
 plt.legend()
-plt.show()
+plt.savefig('loss_plot.png')
 
 
 print("yay")
