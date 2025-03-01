@@ -12,9 +12,10 @@ if torch.hpu.is_available():
     device = "hpu"
 else:
     device = "cpu"
-
 with open('panchatantra.txt', 'r', encoding='utf-8') as f:
     text = f.read()
+    # Remove all punctuation from the text
+    text = re.sub(r'[^\w\s]', '', text)
 
 # preprocessed_text = re.findall(r'\w+|[^\w\s]', text)
 preprocessed_text = re.split(r'([,.:;?_!"()\']|--|\s)', text)
