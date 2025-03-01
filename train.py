@@ -24,9 +24,8 @@ preprocessed_text = [item.strip() for item in preprocessed_text]
 # print(preprocessed_text[:10])
 
 all_words = sorted(list(set(preprocessed_text)))
-print(all_words[:30])
 # punctuations = all_words[:19]
-all_words = all_words[19:] # remove punctuations from vocab
+# all_words = all_words[19:] # remove punctuations from vocab
 all_words.extend(["<|end_of_text|>", "<|unk|>"])
 
 vocab = {token: i for i, token in enumerate(all_words)}
