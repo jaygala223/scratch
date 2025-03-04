@@ -11,3 +11,5 @@ Source: https://grehlakshmi.com/hindi-kahani/
 Source: https://mylofamily.com/hi/article/-235917
 
 Source: https://www.thebridalbox.com/hindi/kahaniya/panchtantra/page/0/
+
+Source: https://www.cheggindia.com/hi/panchatantra-ki-5-kahaniyan/
