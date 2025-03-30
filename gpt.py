@@ -1,19 +1,7 @@
 import re
 import torch.nn as nn
-
-# with open('panchatantra.txt', 'r', encoding='utf-8') as f:
-#     text = f.read()
-
-# # result = re.findall(r'\w+|[^\w\s]', text)
-# preprocessed_text = re.split(r'([,.:;?_!"()\']|--|\s)', text)
-# preprocessed_text = [item.strip() for item in preprocessed_text]
-
-# all_words = sorted(list(set(preprocessed_text)))
-# all_words.extend(["<|end_of_text|>", "<|unk|>"])
-
-# vocab = {token: i for i, token in enumerate(all_words)}
-
-# print(len(vocab))
+import torch
+from torch.utils.data import Dataset
 
 # tokenizer
 class SimpleTokenizer:
@@ -37,9 +25,6 @@ class SimpleTokenizer:
         # text = re.sub(r'([,.:;?_!"()\']|--|\s)',r'\1',  text)
         return text
 
-# dataloader
-import torch
-from torch.utils.data import Dataset, DataLoader
 
 class PanchatantraDataset(Dataset):
     def __init__(self, input, tokenizer, context_length, stride=1):
@@ -235,132 +220,3 @@ class GPTModel(nn.Module):
         x = self.final_norm(x)
         logits = self.out_head(x)
         return logits
-
-
-def generate_text_simple(model, idx, max_new_tokens, context_size, temperature=0, top_k=None):
-    # idx is (B, T) array of indices in the current context
-    for _ in range(max_new_tokens):
-
-        # Crop current context if it exceeds the supported context size
-        # E.g., if LLM supports only 5 tokens, and the context size is 10
-        # then only the last 5 tokens are used as context
-        # idx_cond = idx[:, -context_size:]
-
-        with torch.no_grad():
-            logits = model(idx)
-
-        # Focus only on the last time step
-        # (batch, n_token, vocab_size) becomes (batch, vocab_size)
-        logits = logits[:, -1, :]
-
-        if top_k is not None:
-            top_logits, _ = torch.topk(logits, top_k)
-            min_val = top_logits[:, -1]
-            logits = torch.where(
-                logits < min_val,
-                torch.tensor(float('-inf')).to(logits.device),
-                logits
-            )
-        if temperature > 0.0:
-            logits = logits / temperature
-            probs = torch.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-        else:
-            idx_next = torch.argmax(logits, dim=-1, keepdim=True)
-        idx = torch.cat((idx, idx_next), dim=1)
-
-    return idx
-
-def generate_text_simple_with_kv_cache(model, idx, max_new_tokens, context_size, temperature=0, top_k=None):
-    
-    #prefill
-    logits = model(idx, use_kv_cache=True)
-    logits = logits[:, -1, :]
-    idx_next = torch.argmax(logits, dim=-1, keepdim=True)
-
-    pos_idx = idx.shape[1]
-
-    idx = torch.cat((idx, idx_next), dim=1)
-
-    # idx is (B, T) array of indices in the current context
-    for _ in range(max_new_tokens-1):
-
-        # Crop current context if it exceeds the supported context size
-        # E.g., if LLM supports only 5 tokens, and the context size is 10
-        # then only the last 5 tokens are used as context
-
-        with torch.no_grad():
-            logits = model(idx_next, use_kv_cache=True, pos_idx=pos_idx)
-
-        # Focus only on the last time step
-        # (batch, n_token, vocab_size) becomes (batch, vocab_size)
-        logits = logits[:, -1, :]
-
-        if top_k is not None:
-            top_logits, _ = torch.topk(logits, top_k)
-            min_val = top_logits[:, -1]
-            logits = torch.where(
-                logits < min_val,
-                torch.tensor(float('-inf')).to(logits.device),
-                logits
-            )
-        if temperature > 0.0:
-            logits = logits / temperature
-            probs = torch.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-        else:
-            idx_next = torch.argmax(logits, dim=-1, keepdim=True)
-        idx = torch.cat((idx, idx_next), dim=1)
-    
-        pos_idx += 1
-
-    return idx
-
-
-def main():
-
-    GPT_CONFIG_124M = {
-        "vocab_size": 1110,     # Vocabulary size
-        "context_length": 16,  # Context length
-        "emb_dim": 768,          # Embedding dimension
-        "n_heads": 4,           # Number of attention heads
-        "n_layers": 4,          # Number of layers
-        "drop_rate": 0.1,        # Dropout rate
-        "qkv_bias": False        # Query-Key-Value bias
-    }
-
-    torch.manual_seed(123)
-    model = GPTModel(GPT_CONFIG_124M)
-
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Total number of parameters: {total_params:,}")
-
-    model.eval()  # disable dropout
-
-    start_context = "एक बार एक"
-
-    # tokenizer = tiktoken.get_encoding("gpt2")
-    tokenizer = SimpleTokenizer(vocab=vocab)
-    encoded = tokenizer.encode(start_context)
-    encoded_tensor = torch.tensor(encoded).unsqueeze(0)
-
-    print(f"\n{50*'='}\n{22*' '}IN\n{50*'='}")
-    print("\nInput text:", start_context)
-    print("Encoded input text:", encoded)
-    print("encoded_tensor.shape:", encoded_tensor.shape)
-
-    out = generate_text_simple(
-        model=model,
-        idx=encoded_tensor,
-        max_new_tokens=10,
-        context_size=GPT_CONFIG_124M["context_length"]
-    )
-    decoded_text = tokenizer.decode(out.squeeze(0).tolist())
-
-    print(f"\n\n{50*'='}\n{22*' '}OUT\n{50*'='}")
-    print("\nOutput:", out)
-    print("Output length:", len(out[0]))
-    print("Output text:", decoded_text)
-
-if __name__ == "__main__":
-    main()
