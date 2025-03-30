@@ -45,7 +45,7 @@ model_config = {
     "context_length": 128,  # Context length
     "emb_dim": 1024,          # Embedding dimension
     "n_heads": 32,           # Number of attention heads
-    "n_layers": 16,          # Number of layers
+    "n_layers": 64,          # Number of layers
     "drop_rate": 0.1,        # Dropout rate
     "qkv_bias": False 
 }
