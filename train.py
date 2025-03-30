@@ -31,7 +31,7 @@ all_words.extend(["<|end_of_text|>", "<|unk|>"])
 vocab = {token: i for i, token in enumerate(all_words)}
 
 tokenizer = SimpleTokenizer(vocab=vocab)
-train_ratio = 0.8
+train_ratio = 0.9
 test_ratio = 1 - train_ratio
 train_size = int(len(preprocessed_text) * train_ratio)
 train_data = preprocessed_text[:train_size]
@@ -43,20 +43,20 @@ test_dataset = PanchatantraDataset(input=test_data, tokenizer=tokenizer, context
 from torch.utils.data import DataLoader
 
 train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, drop_last=True)
-test_dataloader = DataLoader(test_dataset, batch_size=8, shuffle=False, drop_last=False) #Added test dataloader
+test_dataloader = DataLoader(test_dataset, batch_size=8, shuffle=False, drop_last=True) #Added test dataloader
 
 model_config = {
     "vocab_size": len(vocab),     # Vocabulary size
     "context_length": 128,  # Context length
     "emb_dim": 1024,          # Embedding dimension
     "n_heads": 32,           # Number of attention heads
-    "n_layers": 64,          # Number of layers
+    "n_layers": 16,          # Number of layers
     "drop_rate": 0.1,        # Dropout rate
     "qkv_bias": False 
 }
 
 learning_rate = 1e-4
-num_epochs = 10
+num_epochs = 1
 
 model = GPTModel(cfg=model_config)
 model.to(device)
@@ -88,62 +88,84 @@ for epoch in range(num_epochs):
         optimizer.step()
         train_loss += loss.item()
     
-    #Testing Logic
-    model.eval()
-    test_loss = 0
-    with torch.no_grad():
-        for i, batch in enumerate(test_dataloader):
-            inputs, outputs = batch
-            inputs = inputs.to(device)
-            outputs = outputs.to(device)
-            logits = model(inputs)
-            loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), outputs.flatten())
-            test_loss += loss.item()
+    # #Testing Logic
+    # model.eval()
+    # test_loss = 0
+    # with torch.no_grad():
+    #     for i, batch in enumerate(test_dataloader):
+    #         inputs, outputs = batch
+    #         inputs = inputs.to(device)
+    #         outputs = outputs.to(device)
+    #         logits = model(inputs)
+    #         loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), outputs.flatten())
+    #         test_loss += loss.item()
     
-    avg_train_loss = train_loss / len(train_dataloader)
-    avg_test_loss = test_loss / len(test_dataloader)
-    train_losses.append(avg_train_loss)
-    test_losses.append(avg_test_loss)
-    print(f"Train Loss for epoch {epoch}: {avg_train_loss}")
-    print(f"Test Loss for epoch {epoch}: {avg_test_loss}")
-    model.train() #Switch back to training mode
+    # avg_train_loss = train_loss / len(train_dataloader)
+    # avg_test_loss = test_loss / len(test_dataloader)
+    # train_losses.append(avg_train_loss)
+    # test_losses.append(avg_test_loss)
+    # print(f"Train Loss for epoch {epoch}: {avg_train_loss}")
+    # print(f"Test Loss for epoch {epoch}: {avg_test_loss}")
+    # model.train() #Switch back to training mode
 
 print(f"Total training duration: {time.perf_counter() - start}")
 
 #Plot the graph
-epochs = range(num_epochs)
-plt.plot(epochs, train_losses, label='Train Loss')
-plt.plot(epochs, test_losses, label='Test Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Train Loss vs Test Loss')
-plt.legend()
-plt.savefig('loss_plot.png')
+# epochs = range(num_epochs)
+# plt.plot(epochs, train_losses, label='Train Loss')
+# plt.plot(epochs, test_losses, label='Test Loss')
+# plt.xlabel('Epoch')
+# plt.ylabel('Loss')
+# plt.title('Train Loss vs Test Loss')
+# plt.legend()
+# plt.savefig('loss_plot.png')
 
+model.eval()
 
 print("yay")
+import matplotlib.pyplot as plt
+import time
+from gpt import generate_text_simple, generate_text_simple_with_kv_cache
 
-from gpt import generate_text_simple
 
-start_context = "एक बार एक".split()
 
-encoded = tokenizer.encode(start_context)
-encoded_tensor = torch.tensor(encoded).unsqueeze(0).to(device)
+max_new_tokens_values = range(1, 128)
+tps_simple_list = []
+tps_kv_cache_list = []
 
-print(f"\n{50*'='}\n{22*' '}IN\n{50*'='}")
-print("\nInput text:", start_context)
-print("Encoded input text:", encoded)
-print("encoded_tensor.shape:", encoded_tensor.shape)
+for max_new_tokens in max_new_tokens_values:
+    start_context = "एक बार एक".split()
+    encoded = tokenizer.encode(start_context)
+    encoded_tensor = torch.tensor(encoded).unsqueeze(0).to(device)
+    start_time_simple = time.perf_counter()
+    out_simple = generate_text_simple(
+        model=model,
+        idx=encoded_tensor,
+        max_new_tokens=max_new_tokens,
+        context_size=model_config["context_length"]
+    )
+    end_time_simple = time.perf_counter()
+    time_taken_simple = end_time_simple - start_time_simple
+    tokens_per_second_simple = max_new_tokens / time_taken_simple
+    tps_simple_list.append(tokens_per_second_simple)
 
-out = generate_text_simple(
-    model=model,
-    idx=encoded_tensor,
-    max_new_tokens=64,
-    context_size=model_config["context_length"]
-)
-decoded_text = tokenizer.decode(out.squeeze(0).tolist())
+    start_time_kv_cache = time.perf_counter()
+    out_kv_cache = generate_text_simple_with_kv_cache(
+        model=model,
+        idx=encoded_tensor,
+        max_new_tokens=max_new_tokens,
+        context_size=model_config["context_length"]
+    )
+    end_time_kv_cache = time.perf_counter()
+    time_taken_kv_cache = end_time_kv_cache - start_time_kv_cache
+    tokens_per_second_kv_cache = max_new_tokens / time_taken_kv_cache
+    tps_kv_cache_list.append(tokens_per_second_kv_cache)
 
-print(f"\n\n{50*'='}\n{22*' '}OUT\n{50*'='}")
-print("\nOutput:", out)
-print("Output length:", len(out[0]))
-print("Output text:", decoded_text)
+plt.plot(max_new_tokens_values, tps_simple_list, label='Without KV Cache')
+plt.plot(max_new_tokens_values, tps_kv_cache_list, label='With KV Cache')
+plt.xlabel('Max New Tokens')
+plt.ylabel('Tokens per Second')
+plt.title('Tokens per Second vs. Max New Tokens')
+plt.legend()
+plt.savefig('kv_cache_vs_no_kv_cache.png')
+plt.show()

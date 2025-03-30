@@ -79,18 +79,32 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.register_buffer("mask", torch.triu(torch.ones(context_length, context_length), diagonal=1))
 
-    def forward(self, x):
+        self.k_cache = None
+        self.v_cache = None
+
+    def forward(self, x, use_kv_cache=False):
         b, num_tokens, d_in = x.shape
 
         keys = self.W_key(x)  # Shape: (b, num_tokens, d_out)
         queries = self.W_query(x)
         values = self.W_value(x)
 
+        if use_kv_cache:
+            if self.k_cache is None or self.v_cache is None:
+                self.k_cache = keys
+                self.v_cache = values
+            else:
+                self.k_cache = torch.cat((self.k_cache, keys), dim=1)
+                self.v_cache = torch.cat((self.v_cache, values), dim=1)
+
+            keys = self.k_cache
+            values = self.v_cache
+
         # We implicitly split the matrix by adding a `num_heads` dimension
         # Unroll last dim: (b, num_tokens, d_out) -> (b, num_tokens, num_heads, head_dim)
-        keys = keys.view(b, num_tokens, self.num_heads, self.head_dim)
-        values = values.view(b, num_tokens, self.num_heads, self.head_dim)
-        queries = queries.view(b, num_tokens, self.num_heads, self.head_dim)
+        keys = keys.view(b, keys.shape[1], self.num_heads, self.head_dim)
+        values = values.view(b, values.shape[1], self.num_heads, self.head_dim)
+        queries = queries.view(b, queries.shape[1], self.num_heads, self.head_dim)
 
         # Transpose: (b, num_tokens, num_heads, head_dim) -> (b, num_heads, num_tokens, head_dim)
         keys = keys.transpose(1, 2)
@@ -99,19 +113,24 @@ class MultiHeadAttention(nn.Module):
 
         attn_scores = queries @ keys.transpose(2, 3)  # Dot product for each head
 
-        # Original mask truncated to the number of tokens and converted to boolean
-        mask_bool = self.mask.bool()[:num_tokens, :num_tokens]
+        if not use_kv_cache or queries.shape[1] != 1: #indicating in kv cache mode but prefill
+            # Original mask truncated to the number of tokens and converted to boolean
+            mask_bool = self.mask.bool()[:num_tokens, :num_tokens]
 
-        attn_scores.masked_fill_(mask_bool, -torch.inf)
+            attn_scores.masked_fill_(mask_bool, -torch.inf)
 
         attn_weights = torch.softmax(attn_scores / keys.shape[-1]**0.5, dim=-1)
-        attn_weights = self.dropout(attn_weights)
+        
+        # attn_weights = self.dropout(attn_weights)
 
         # Shape: (b, num_tokens, num_heads, head_dim)
         context_vec = (attn_weights @ values).transpose(1, 2)
 
         # Combine heads, where self.d_out = self.num_heads * self.head_dim
-        context_vec = context_vec.contiguous().view(b, num_tokens, self.d_out)
+        if use_kv_cache: context_vec = context_vec.contiguous().view(b, -1, self.d_out)
+        else: 
+            context_vec = context_vec.contiguous().view(b, num_tokens, self.d_out)
+            context_vec = context_vec[:, -1, :]
         context_vec = self.out_proj(context_vec)  # optional projection
 
         return context_vec
@@ -169,17 +188,17 @@ class TransformerBlock(nn.Module):
         self.norm2 = LayerNorm(cfg["emb_dim"])
         self.drop = nn.Dropout(cfg["drop_rate"])
 
-    def forward(self, x):
+    def forward(self, x, use_kv_cache=False):
         res = x
         x = self.norm1(x)
-        x = self.att(x)   # Shape [batch_size, num_tokens, emb_size]
-        x = self.drop(x)
+        x = self.att(x, use_kv_cache)   # Shape [batch_size, num_tokens, emb_size]
+        # x = self.drop(x)
         x = x + res
 
         res = x
         x = self.norm2(x)
         x = self.ff(x)
-        x = self.drop(x)
+        # x = self.drop(x)
         x = x + res
 
         return x
@@ -198,13 +217,21 @@ class GPTModel(nn.Module):
         self.final_norm = LayerNorm(cfg["emb_dim"])
         self.out_head = nn.Linear(cfg["emb_dim"], cfg["vocab_size"], bias=False)
 
-    def forward(self, in_idx):
+    def forward(self, in_idx, use_kv_cache = False, pos_idx=None):
         batch_size, seq_len = in_idx.shape
         tok_embeds = self.tok_emb(in_idx)
-        pos_embeds = self.pos_emb(torch.arange(seq_len, device=in_idx.device))
-        x = tok_embeds + pos_embeds  # Shape [batch_size, num_tokens, emb_size]
-        x = self.drop_emb(x)
-        x = self.trf_blocks(x)
+        if not use_kv_cache:
+            pos_embeds = self.pos_emb(torch.arange(seq_len, device=in_idx.device))
+            x = tok_embeds + pos_embeds  # Shape [batch_size, num_tokens, emb_size]
+        elif use_kv_cache and pos_idx is None:
+            pos_embeds = self.pos_emb(torch.arange(seq_len, device=in_idx.device))
+            x = tok_embeds + pos_embeds  # Shape [batch_size, num_tokens, emb_size]
+        else:
+            pos_embeds = self.pos_emb(torch.arange(pos_idx+1, device=in_idx.device))[-1:, :]
+            x = tok_embeds + pos_embeds
+        # x = self.drop_emb(x)
+        for block in self.trf_blocks:
+            x = block(x, use_kv_cache)
         x = self.final_norm(x)
         logits = self.out_head(x)
         return logits
@@ -217,10 +244,10 @@ def generate_text_simple(model, idx, max_new_tokens, context_size, temperature=0
         # Crop current context if it exceeds the supported context size
         # E.g., if LLM supports only 5 tokens, and the context size is 10
         # then only the last 5 tokens are used as context
-        idx_cond = idx[:, -context_size:]
+        # idx_cond = idx[:, -context_size:]
 
         with torch.no_grad():
-            logits = model(idx_cond)
+            logits = model(idx)
 
         # Focus only on the last time step
         # (batch, n_token, vocab_size) becomes (batch, vocab_size)
@@ -241,6 +268,51 @@ def generate_text_simple(model, idx, max_new_tokens, context_size, temperature=0
         else:
             idx_next = torch.argmax(logits, dim=-1, keepdim=True)
         idx = torch.cat((idx, idx_next), dim=1)
+
+    return idx
+
+def generate_text_simple_with_kv_cache(model, idx, max_new_tokens, context_size, temperature=0, top_k=None):
+    
+    #prefill
+    logits = model(idx, use_kv_cache=True)
+    logits = logits[:, -1, :]
+    idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+
+    pos_idx = idx.shape[1]
+
+    idx = torch.cat((idx, idx_next), dim=1)
+
+    # idx is (B, T) array of indices in the current context
+    for _ in range(max_new_tokens-1):
+
+        # Crop current context if it exceeds the supported context size
+        # E.g., if LLM supports only 5 tokens, and the context size is 10
+        # then only the last 5 tokens are used as context
+
+        with torch.no_grad():
+            logits = model(idx_next, use_kv_cache=True, pos_idx=pos_idx)
+
+        # Focus only on the last time step
+        # (batch, n_token, vocab_size) becomes (batch, vocab_size)
+        logits = logits[:, -1, :]
+
+        if top_k is not None:
+            top_logits, _ = torch.topk(logits, top_k)
+            min_val = top_logits[:, -1]
+            logits = torch.where(
+                logits < min_val,
+                torch.tensor(float('-inf')).to(logits.device),
+                logits
+            )
+        if temperature > 0.0:
+            logits = logits / temperature
+            probs = torch.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+        else:
+            idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+        idx = torch.cat((idx, idx_next), dim=1)
+    
+        pos_idx += 1
 
     return idx
 
