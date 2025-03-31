@@ -99,7 +99,6 @@ class MultiHeadAttention(nn.Module):
         attn_scores = queries @ keys.transpose(2, 3)  # Dot product for each head
 
         if not use_kv_cache or queries.shape[1] != 1: #indicating in kv cache mode but prefill
-            # Original mask truncated to the number of tokens and converted to boolean
             mask_bool = self.mask.bool()[:num_tokens, :num_tokens]
 
             attn_scores.masked_fill_(mask_bool, -torch.inf)
